@@ -1,5 +1,5 @@
 #pragma once
-#pragma message "ESP32 Hardware SPI support added"
+//#pragma message "ESP32 Hardware SPI support added"
 
 FASTLED_NAMESPACE_BEGIN
 
