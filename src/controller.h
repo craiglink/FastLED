@@ -9,6 +9,9 @@
 #include "pixeltypes.h"
 #include "color.h"
 #include <stddef.h>
+#include "rgb_2_rgbw.h"
+#include "five_bit_hd_gamma.h"
+#include "force_inline.h"
 
 FASTLED_NAMESPACE_BEGIN
 
@@ -186,6 +189,31 @@ public:
     /// @return the currently set dithering option (CLEDController::m_DitherMode)
     inline uint8_t getDither() { return m_DitherMode; }
 
+    virtual void* beginShowLeds() {
+        // By default, emit an integer. This integer will, by default, be passed back.
+        // If you override beginShowLeds() then
+        // you should also override endShowLeds() to match the return state.
+        //
+        // For async led controllers this should be used as a sync point to block
+        // the caller until the leds from the last draw frame have completed drawing.
+        // for each controller:
+        //   beginShowLeds();
+        // for each controller:
+        //   showLeds();
+        // for each controller:
+        //   endShowLeds();
+        uintptr_t d = getDither();
+        void* out = reinterpret_cast<void*>(d);
+        return out;
+    }
+    virtual void endShowLeds(void* data) {
+        // By default recieves the integer that beginShowLeds() emitted.
+        //For async controllers this should be used to signal the controller
+        // to begin transmitting the current frame to the leds.
+        uintptr_t d = reinterpret_cast<uintptr_t>(data);
+        setDither(static_cast<uint8_t>(d));
+    }
+
     /// The color corrction to use for this controller, expressed as a CRGB object
     /// @param correction the color correction to set
     /// @returns a reference to the controller
@@ -299,7 +327,10 @@ struct PixelController {
         /// @param dither dither setting for the LEDs
         /// @param advance whether the pointer (d) should advance per LED
         /// @param skip if the pointer is advancing, how many bytes to skip in addition to 3
-        PixelController(const uint8_t *d, int len, CRGB & s, EDitherMode dither = BINARY_DITHER, bool advance=true, uint8_t skip=0) : mData(d), mLen(len), mLenRemaining(len), mScale(s) {
+        PixelController(
+                const uint8_t *d, int len, CRGB & s,
+                EDitherMode dither = BINARY_DITHER, bool advance=true, uint8_t skip=0)
+                    : mData(d), mLen(len), mLenRemaining(len), mScale(s) {
             enable_dithering(dither);
             mData += skip;
             mAdvance = (advance) ? 3+skip : 0;
@@ -311,7 +342,10 @@ struct PixelController {
         /// @param len length of the LED data
         /// @param s LED scale values, as CRGB struct
         /// @param dither dither setting for the LEDs
-        PixelController(const CRGB *d, int len, CRGB & s, EDitherMode dither = BINARY_DITHER) : mData((const uint8_t*)d), mLen(len), mLenRemaining(len), mScale(s) {
+        PixelController(
+                const CRGB *d, int len, CRGB & s,
+                EDitherMode dither = BINARY_DITHER)
+                    : mData((const uint8_t*)d), mLen(len), mLenRemaining(len), mScale(s) {
             enable_dithering(dither);
             mAdvance = 3;
             initOffsets(len);
@@ -322,7 +356,9 @@ struct PixelController {
         /// @param len length of the LED data
         /// @param s LED scale values, as CRGB struct
         /// @param dither dither setting for the LEDs
-        PixelController(const CRGB &d, int len, CRGB & s, EDitherMode dither = BINARY_DITHER) : mData((const uint8_t*)&d), mLen(len), mLenRemaining(len), mScale(s) {
+        PixelController(
+                const CRGB &d, int len, CRGB & s, EDitherMode dither = BINARY_DITHER)
+                    : mData((const uint8_t*)&d), mLen(len), mLenRemaining(len), mScale(s) {
             enable_dithering(dither);
             mAdvance = 0;
             initOffsets(len);
@@ -425,7 +461,7 @@ struct PixelController {
         /// Do we have n pixels left to process?
         /// @param n the number to check against
         /// @returns 'true' if there are more than n pixels left to process
-        __attribute__((always_inline)) inline bool has(int n) {
+        FASTLED_FORCE_INLINE bool has(int n) {
             return mLenRemaining >= n;
         }
 
@@ -443,22 +479,22 @@ struct PixelController {
 
         /// Get the length of the LED strip
         /// @returns PixelController::mLen
-        __attribute__((always_inline)) inline int size() { return mLen; }
+        FASTLED_FORCE_INLINE int size() { return mLen; }
 
         /// Get the number of lanes of the Controller
         /// @returns LANES from template
-        __attribute__((always_inline)) inline int lanes() { return LANES; }
+        FASTLED_FORCE_INLINE int lanes() { return LANES; }
 
         /// Get the amount to advance the pointer by
         /// @returns PixelController::mAdvance
-        __attribute__((always_inline)) inline int advanceBy() { return mAdvance; }
+        FASTLED_FORCE_INLINE int advanceBy() { return mAdvance; }
 
         /// Advance the data pointer forward, adjust position counter
-         __attribute__((always_inline)) inline void advanceData() { mData += mAdvance; --mLenRemaining;}
+         FASTLED_FORCE_INLINE void advanceData() { mData += mAdvance; --mLenRemaining;}
 
         /// Step the dithering forward
         /// @note If updating here, be sure to update the asm version in clockless_trinket.h!
-         __attribute__((always_inline)) inline void stepDithering() {
+         FASTLED_FORCE_INLINE void stepDithering() {
              // IF UPDATING HERE, BE SURE TO UPDATE THE ASM VERSION IN
              // clockless_trinket.h!
                 d[0] = e[0] - d[0];
@@ -467,7 +503,7 @@ struct PixelController {
         }
 
         /// Some chipsets pre-cycle the first byte, which means we want to cycle byte 0's dithering separately
-        __attribute__((always_inline)) inline void preStepFirstByteDithering() {
+        FASTLED_FORCE_INLINE void preStepFirstByteDithering() {
             d[RO(0)] = e[RO(0)] - d[RO(0)];
         }
 
@@ -478,36 +514,36 @@ struct PixelController {
         /// Read a byte of LED data
         /// @tparam SLOT The data slot in the output stream. This is used to select which byte of the output stream is being processed.
         /// @param pc reference to the pixel controller
-        template<int SLOT>  __attribute__((always_inline)) inline static uint8_t loadByte(PixelController & pc) { return pc.mData[RO(SLOT)]; }
+        template<int SLOT>  FASTLED_FORCE_INLINE static uint8_t loadByte(PixelController & pc) { return pc.mData[RO(SLOT)]; }
         /// Read a byte of LED data for parallel output
         /// @tparam SLOT The data slot in the output stream. This is used to select which byte of the output stream is being processed.
         /// @param pc reference to the pixel controller
         /// @param lane the parallel output lane to read the byte for
-        template<int SLOT>  __attribute__((always_inline)) inline static uint8_t loadByte(PixelController & pc, int lane) { return pc.mData[pc.mOffsets[lane] + RO(SLOT)]; }
+        template<int SLOT>  FASTLED_FORCE_INLINE static uint8_t loadByte(PixelController & pc, int lane) { return pc.mData[pc.mOffsets[lane] + RO(SLOT)]; }
 
         /// Calculate a dither value using the per-channel dither data
         /// @tparam SLOT The data slot in the output stream. This is used to select which byte of the output stream is being processed.
         /// @param pc reference to the pixel controller
         /// @param b the color byte to dither
         /// @see PixelController::d
-        template<int SLOT>  __attribute__((always_inline)) inline static uint8_t dither(PixelController & pc, uint8_t b) { return b ? qadd8(b, pc.d[RO(SLOT)]) : 0; }
+        template<int SLOT>  FASTLED_FORCE_INLINE static uint8_t dither(PixelController & pc, uint8_t b) { return b ? qadd8(b, pc.d[RO(SLOT)]) : 0; }
         /// Calculate a dither value
         /// @tparam SLOT The data slot in the output stream. This is used to select which byte of the output stream is being processed.
         /// @param b the color byte to dither
         /// @param d dither data
-        template<int SLOT>  __attribute__((always_inline)) inline static uint8_t dither(PixelController & , uint8_t b, uint8_t d) { return b ? qadd8(b,d) : 0; }
+        template<int SLOT>  FASTLED_FORCE_INLINE static uint8_t dither(PixelController & , uint8_t b, uint8_t d) { return b ? qadd8(b,d) : 0; }
 
         /// Scale a value using the per-channel scale data
         /// @tparam SLOT The data slot in the output stream. This is used to select which byte of the output stream is being processed.
         /// @param pc reference to the pixel controller
         /// @param b the color byte to scale
         /// @see PixelController::mScale
-        template<int SLOT>  __attribute__((always_inline)) inline static uint8_t scale(PixelController & pc, uint8_t b) { return scale8(b, pc.mScale.raw[RO(SLOT)]); }
+        template<int SLOT>  FASTLED_FORCE_INLINE static uint8_t scale(PixelController & pc, uint8_t b) { return scale8(b, pc.mScale.raw[RO(SLOT)]); }
         /// Scale a value
         /// @tparam SLOT The data slot in the output stream. This is used to select which byte of the output stream is being processed.
         /// @param b the byte to scale
         /// @param scale the scale value
-        template<int SLOT>  __attribute__((always_inline)) inline static uint8_t scale(PixelController & , uint8_t b, uint8_t scale) { return scale8(b, scale); }
+        template<int SLOT>  FASTLED_FORCE_INLINE static uint8_t scale(PixelController & , uint8_t b, uint8_t scale) { return scale8(b, scale); }
 
         /// @name Composite shortcut functions for loading, dithering, and scaling
         /// These composite functions will load color data, dither it, and scale it
@@ -519,13 +555,13 @@ struct PixelController {
         /// Loads, dithers, and scales a single byte for a given output slot, using class dither and scale values
         /// @tparam SLOT The data slot in the output stream. This is used to select which byte of the output stream is being processed.
         /// @param pc reference to the pixel controller
-        template<int SLOT>  __attribute__((always_inline)) inline static uint8_t loadAndScale(PixelController & pc) { return scale<SLOT>(pc, pc.dither<SLOT>(pc, pc.loadByte<SLOT>(pc))); }
+        template<int SLOT>  FASTLED_FORCE_INLINE static uint8_t loadAndScale(PixelController & pc) { return scale<SLOT>(pc, pc.dither<SLOT>(pc, pc.loadByte<SLOT>(pc))); }
 
         /// Loads, dithers, and scales a single byte for a given output slot and lane, using class dither and scale values
         /// @tparam SLOT The data slot in the output stream. This is used to select which byte of the output stream is being processed.
         /// @param pc reference to the pixel controller
         /// @param lane the parallel output lane to read the byte for
-        template<int SLOT>  __attribute__((always_inline)) inline static uint8_t loadAndScale(PixelController & pc, int lane) { return scale<SLOT>(pc, pc.dither<SLOT>(pc, pc.loadByte<SLOT>(pc, lane))); }
+        template<int SLOT>  FASTLED_FORCE_INLINE static uint8_t loadAndScale(PixelController & pc, int lane) { return scale<SLOT>(pc, pc.dither<SLOT>(pc, pc.loadByte<SLOT>(pc, lane))); }
 
         /// Loads, dithers, and scales a single byte for a given output slot and lane
         /// @tparam SLOT The data slot in the output stream. This is used to select which byte of the output stream is being processed.
@@ -533,30 +569,30 @@ struct PixelController {
         /// @param lane the parallel output lane to read the byte for
         /// @param d the dither data for the byte
         /// @param scale the scale data for the byte
-        template<int SLOT>  __attribute__((always_inline)) inline static uint8_t loadAndScale(PixelController & pc, int lane, uint8_t d, uint8_t scale) { return scale8(pc.dither<SLOT>(pc, pc.loadByte<SLOT>(pc, lane), d), scale); }
+        template<int SLOT>  FASTLED_FORCE_INLINE static uint8_t loadAndScale(PixelController & pc, int lane, uint8_t d, uint8_t scale) { return scale8(pc.dither<SLOT>(pc, pc.loadByte<SLOT>(pc, lane), d), scale); }
 
         /// Loads and scales a single byte for a given output slot and lane
         /// @tparam SLOT The data slot in the output stream. This is used to select which byte of the output stream is being processed.
         /// @param pc reference to the pixel controller
         /// @param lane the parallel output lane to read the byte for
         /// @param scale the scale data for the byte
-        template<int SLOT>  __attribute__((always_inline)) inline static uint8_t loadAndScale(PixelController & pc, int lane, uint8_t scale) { return scale8(pc.loadByte<SLOT>(pc, lane), scale); }
+        template<int SLOT>  FASTLED_FORCE_INLINE static uint8_t loadAndScale(PixelController & pc, int lane, uint8_t scale) { return scale8(pc.loadByte<SLOT>(pc, lane), scale); }
 
 
         /// A version of loadAndScale() that advances the output data pointer
         /// @param pc reference to the pixel controller
-        template<int SLOT>  __attribute__((always_inline)) inline static uint8_t advanceAndLoadAndScale(PixelController & pc) { pc.advanceData(); return pc.loadAndScale<SLOT>(pc); }
+        template<int SLOT>  FASTLED_FORCE_INLINE static uint8_t advanceAndLoadAndScale(PixelController & pc) { pc.advanceData(); return pc.loadAndScale<SLOT>(pc); }
 
         /// A version of loadAndScale() that advances the output data pointer
         /// @param pc reference to the pixel controller
         /// @param lane the parallel output lane to read the byte for
-        template<int SLOT>  __attribute__((always_inline)) inline static uint8_t advanceAndLoadAndScale(PixelController & pc, int lane) { pc.advanceData(); return pc.loadAndScale<SLOT>(pc, lane); }
+        template<int SLOT>  FASTLED_FORCE_INLINE static uint8_t advanceAndLoadAndScale(PixelController & pc, int lane) { pc.advanceData(); return pc.loadAndScale<SLOT>(pc, lane); }
 
         /// A version of loadAndScale() that advances the output data pointer without dithering
         /// @param pc reference to the pixel controller
         /// @param lane the parallel output lane to read the byte for
         /// @param scale the scale data for the byte
-        template<int SLOT>  __attribute__((always_inline)) inline static uint8_t advanceAndLoadAndScale(PixelController & pc, int lane, uint8_t scale) { pc.advanceData(); return pc.loadAndScale<SLOT>(pc, lane, scale); }
+        template<int SLOT>  FASTLED_FORCE_INLINE static uint8_t advanceAndLoadAndScale(PixelController & pc, int lane, uint8_t scale) { pc.advanceData(); return pc.loadAndScale<SLOT>(pc, lane, scale); }
 
         /// @} Composite shortcut functions
 
@@ -571,14 +607,14 @@ struct PixelController {
         /// @param pc reference to the pixel controller
         /// @returns dithering data for the given channel
         /// @see PixelController::d
-        template<int SLOT>  __attribute__((always_inline)) inline static uint8_t getd(PixelController & pc) { return pc.d[RO(SLOT)]; }
+        template<int SLOT>  FASTLED_FORCE_INLINE static uint8_t getd(PixelController & pc) { return pc.d[RO(SLOT)]; }
 
         /// Gets the scale data for the provided output slot
         /// @tparam SLOT The data slot in the output stream. This is used to select which byte of the output stream is being processed.
         /// @param pc reference to the pixel controller
         /// @returns scale data for the given channel
         /// @see PixelController::mScale
-        template<int SLOT>  __attribute__((always_inline)) inline static uint8_t getscale(PixelController & pc) { return pc.mScale.raw[RO(SLOT)]; }
+        template<int SLOT>  FASTLED_FORCE_INLINE static uint8_t getscale(PixelController & pc) { return pc.mScale.raw[RO(SLOT)]; }
 
         /// @} Data retrieval functions
 
@@ -586,27 +622,109 @@ struct PixelController {
         /// @} Template'd static functions for output
 
         // Helper functions to get around gcc stupidities
-        __attribute__((always_inline)) inline uint8_t loadAndScale0(int lane, uint8_t scale) { return loadAndScale<0>(*this, lane, scale); }  ///< non-template alias of loadAndScale<0>()
-        __attribute__((always_inline)) inline uint8_t loadAndScale1(int lane, uint8_t scale) { return loadAndScale<1>(*this, lane, scale); }  ///< non-template alias of loadAndScale<1>()
-        __attribute__((always_inline)) inline uint8_t loadAndScale2(int lane, uint8_t scale) { return loadAndScale<2>(*this, lane, scale); }  ///< non-template alias of loadAndScale<2>()
-        __attribute__((always_inline)) inline uint8_t advanceAndLoadAndScale0(int lane, uint8_t scale) { return advanceAndLoadAndScale<0>(*this, lane, scale); }  ///< non-template alias of advanceAndLoadAndScale<0>()
-        __attribute__((always_inline)) inline uint8_t stepAdvanceAndLoadAndScale0(int lane, uint8_t scale) { stepDithering(); return advanceAndLoadAndScale<0>(*this, lane, scale); }  ///< stepDithering() and advanceAndLoadAndScale0()
+        FASTLED_FORCE_INLINE uint8_t loadAndScale0(int lane, uint8_t scale) { return loadAndScale<0>(*this, lane, scale); }  ///< non-template alias of loadAndScale<0>()
+        FASTLED_FORCE_INLINE uint8_t loadAndScale1(int lane, uint8_t scale) { return loadAndScale<1>(*this, lane, scale); }  ///< non-template alias of loadAndScale<1>()
+        FASTLED_FORCE_INLINE uint8_t loadAndScale2(int lane, uint8_t scale) { return loadAndScale<2>(*this, lane, scale); }  ///< non-template alias of loadAndScale<2>()
+        FASTLED_FORCE_INLINE uint8_t advanceAndLoadAndScale0(int lane, uint8_t scale) { return advanceAndLoadAndScale<0>(*this, lane, scale); }  ///< non-template alias of advanceAndLoadAndScale<0>()
+        FASTLED_FORCE_INLINE uint8_t stepAdvanceAndLoadAndScale0(int lane, uint8_t scale) { stepDithering(); return advanceAndLoadAndScale<0>(*this, lane, scale); }  ///< stepDithering() and advanceAndLoadAndScale0()
 
-        __attribute__((always_inline)) inline uint8_t loadAndScale0(int lane) { return loadAndScale<0>(*this, lane); }  ///< @copydoc loadAndScale0(int, uint8_t)
-        __attribute__((always_inline)) inline uint8_t loadAndScale1(int lane) { return loadAndScale<1>(*this, lane); }  ///< @copydoc loadAndScale1(int, uint8_t)
-        __attribute__((always_inline)) inline uint8_t loadAndScale2(int lane) { return loadAndScale<2>(*this, lane); }  ///< @copydoc loadAndScale2(int, uint8_t)
-        __attribute__((always_inline)) inline uint8_t advanceAndLoadAndScale0(int lane) { return advanceAndLoadAndScale<0>(*this, lane); }  ///< @copydoc advanceAndLoadAndScale0(int, uint8_t)
-        __attribute__((always_inline)) inline uint8_t stepAdvanceAndLoadAndScale0(int lane) { stepDithering(); return advanceAndLoadAndScale<0>(*this, lane); }  ///< @copydoc stepAdvanceAndLoadAndScale0(int, uint8_t)
+        FASTLED_FORCE_INLINE uint8_t loadAndScale0(int lane) { return loadAndScale<0>(*this, lane); }  ///< @copydoc loadAndScale0(int, uint8_t)
+        FASTLED_FORCE_INLINE uint8_t loadAndScale1(int lane) { return loadAndScale<1>(*this, lane); }  ///< @copydoc loadAndScale1(int, uint8_t)
+        FASTLED_FORCE_INLINE uint8_t loadAndScale2(int lane) { return loadAndScale<2>(*this, lane); }  ///< @copydoc loadAndScale2(int, uint8_t)
+        FASTLED_FORCE_INLINE uint8_t advanceAndLoadAndScale0(int lane) { return advanceAndLoadAndScale<0>(*this, lane); }  ///< @copydoc advanceAndLoadAndScale0(int, uint8_t)
+        FASTLED_FORCE_INLINE uint8_t stepAdvanceAndLoadAndScale0(int lane) { stepDithering(); return advanceAndLoadAndScale<0>(*this, lane); }  ///< @copydoc stepAdvanceAndLoadAndScale0(int, uint8_t)
 
-        __attribute__((always_inline)) inline uint8_t loadAndScale0() { return loadAndScale<0>(*this); }  ///< @copydoc loadAndScale0(int, uint8_t)
-        __attribute__((always_inline)) inline uint8_t loadAndScale1() { return loadAndScale<1>(*this); }  ///< @copydoc loadAndScale1(int, uint8_t)
-        __attribute__((always_inline)) inline uint8_t loadAndScale2() { return loadAndScale<2>(*this); }  ///< @copydoc loadAndScale2(int, uint8_t)
-        __attribute__((always_inline)) inline uint8_t advanceAndLoadAndScale0() { return advanceAndLoadAndScale<0>(*this); }  ///< @copydoc advanceAndLoadAndScale0(int, uint8_t)
-        __attribute__((always_inline)) inline uint8_t stepAdvanceAndLoadAndScale0() { stepDithering(); return advanceAndLoadAndScale<0>(*this); }  ///< @copydoc stepAdvanceAndLoadAndScale0(int, uint8_t)
+        // LoadAndScale0 loads the pixel data in the order specified by RGB_ORDER and then scales it by the color correction values
+        // For example in color order GRB, loadAndScale0() will return the green channel scaled by the color correction value for green.
+        FASTLED_FORCE_INLINE uint8_t loadAndScale0() { return loadAndScale<0>(*this); }  ///< @copydoc loadAndScale0(int, uint8_t)
+        FASTLED_FORCE_INLINE uint8_t loadAndScale1() { return loadAndScale<1>(*this); }  ///< @copydoc loadAndScale1(int, uint8_t)
+        FASTLED_FORCE_INLINE uint8_t loadAndScale2() { return loadAndScale<2>(*this); }  ///< @copydoc loadAndScale2(int, uint8_t)
+        FASTLED_FORCE_INLINE uint8_t advanceAndLoadAndScale0() { return advanceAndLoadAndScale<0>(*this); }  ///< @copydoc advanceAndLoadAndScale0(int, uint8_t)
+        FASTLED_FORCE_INLINE uint8_t stepAdvanceAndLoadAndScale0() { stepDithering(); return advanceAndLoadAndScale<0>(*this); }  ///< @copydoc stepAdvanceAndLoadAndScale0(int, uint8_t)
 
-        __attribute__((always_inline)) inline uint8_t getScale0() { return getscale<0>(*this); }  ///< non-template alias of getscale<0>()
-        __attribute__((always_inline)) inline uint8_t getScale1() { return getscale<1>(*this); }  ///< non-template alias of getscale<1>()
-        __attribute__((always_inline)) inline uint8_t getScale2() { return getscale<2>(*this); }  ///< non-template alias of getscale<2>()
+        FASTLED_FORCE_INLINE uint8_t getScale0() { return getscale<0>(*this); }  ///< non-template alias of getscale<0>()
+        FASTLED_FORCE_INLINE uint8_t getScale1() { return getscale<1>(*this); }  ///< non-template alias of getscale<1>()
+        FASTLED_FORCE_INLINE uint8_t getScale2() { return getscale<2>(*this); }  ///< non-template alias of getscale<2>()
+
+        FASTLED_FORCE_INLINE void loadAndScaleRGB(uint8_t* b0, uint8_t* b1, uint8_t* b2) {
+            *b0 = loadAndScale0();
+            *b1 = loadAndScale1();
+            *b2 = loadAndScale2();
+        }
+
+        /// Generates RGBW pixel information. While the RGB data is loaded in the order specified by RGB_ORDER
+        /// the W data is assumed to be the last byte in the data stream. This is true for WS2812 but may need
+        /// to be changed in the future if the white component starts being reordered across chipsets.
+        FASTLED_FORCE_INLINE void loadAndScaleRGBW(
+                RGBW_MODE rgbw_mode, uint16_t white_color_temp,
+                uint8_t* b0_out, uint8_t* b1_out, uint8_t* b2_out, uint8_t* w_out) {
+            // Get the naive RGB data order in r,g,b.
+            CRGB rgb = CRGB(mData[0], mData[1], mData[2]);  // Raw RGB values in native r,g,b ordering.
+            uint8_t w = 0;
+            rgb_2_rgbw(
+                rgbw_mode,
+                white_color_temp,
+                rgb.r, rgb.b, rgb.g,
+                mScale.r, mScale.g, mScale.b,
+                &rgb.r, &rgb.g, &rgb.b, &w
+            );
+            const uint8_t b0_index = RGB_BYTE0(RGB_ORDER);
+            const uint8_t b1_index = RGB_BYTE1(RGB_ORDER);
+            const uint8_t b2_index = RGB_BYTE2(RGB_ORDER);
+            *b0_out = rgb.raw[b0_index];
+            *b1_out = rgb.raw[b1_index];
+            *b2_out = rgb.raw[b2_index];
+            // Assume the w component is the last byte in the data stream and never reordered.
+            *w_out = w;
+        }
+
+
+        // Slightly faster in template mode when we know that the RGBW_MODE is constant.
+        template<RGBW_MODE MODE>
+        FASTLED_FORCE_INLINE void loadAndScaleRGBW(
+                uint16_t white_color_temp,
+                uint8_t* b0_out, uint8_t* b1_out, uint8_t* b2_out, uint8_t* w_out) {
+            CRGB rgb = CRGB(mData[0], mData[1], mData[2]);  // Raw RGB values in native r,g,b ordering.
+            uint8_t w = 0;
+            rgb_2_rgbw<MODE>(
+                white_color_temp,
+                rgb.r, rgb.b, rgb.g,
+                mScale.r, mScale.g, mScale.b,
+                &rgb.r, &rgb.g, &rgb.b, &w
+            );
+            const uint8_t b0_index = RGB_BYTE0(RGB_ORDER);
+            const uint8_t b1_index = RGB_BYTE1(RGB_ORDER);
+            const uint8_t b2_index = RGB_BYTE2(RGB_ORDER);
+            *b0_out = rgb.raw[b0_index];
+            *b1_out = rgb.raw[b1_index];
+            *b2_out = rgb.raw[b2_index];
+            // Assume the w component is the last byte in the data stream and never reordered.
+            *w_out = w;
+        }
+
+        FASTLED_FORCE_INLINE void loadAndScale_APA102_HD(
+                uint8_t* b0_out, uint8_t* b1_out, uint8_t* b2_out,  // Output RGB values in order of RGB_ORDER
+                uint8_t* brightness_out) {
+            CRGB rgb = CRGB(mData[0], mData[1], mData[2]);
+            uint8_t brightness = 0;
+            if (rgb) {
+                five_bit_hd_gamma_bitshift(
+                    rgb.r, rgb.g, rgb.b,
+                    // Note this mScale has the global brightness scale mixed in with the
+                    // color correction scale.
+                    mScale.r, mScale.g, mScale.b,
+                    &rgb.r, &rgb.g, &rgb.b, &brightness
+                );
+            }
+            const uint8_t b0_index = RGB_BYTE0(RGB_ORDER);
+            const uint8_t b1_index = RGB_BYTE1(RGB_ORDER);
+            const uint8_t b2_index = RGB_BYTE2(RGB_ORDER);
+            *b0_out = rgb.raw[b0_index];
+            *b1_out = rgb.raw[b1_index];
+            *b2_out = rgb.raw[b2_index];
+            *brightness_out = brightness;
+        }
+
 };
 
 /// Template extension of the CLEDController class
@@ -622,18 +740,18 @@ protected:
     /// Set all the LEDs on the controller to a given color
     /// @param data the CRGB color to set the LEDs to
     /// @param nLeds the number of LEDs to set to this color
-    /// @param scale the RGB scaling value for outputting color
-    virtual void showColor(const struct CRGB & data, int nLeds, CRGB scale) {
-        PixelController<RGB_ORDER, LANES, MASK> pixels(data, nLeds, scale, getDither());
+    /// @param scale_pre_mixed the RGB scaling of color adjustment + global brightness to apply to each LED (in RGB8 mode).
+    virtual void showColor(const struct CRGB & data, int nLeds, CRGB scale_pre_mixed) {
+        PixelController<RGB_ORDER, LANES, MASK> pixels(data, nLeds, scale_pre_mixed, getDither());
         showPixels(pixels);
     }
 
     /// Write the passed in RGB data out to the LEDs managed by this controller
     /// @param data the RGB data to write out to the strip
     /// @param nLeds the number of LEDs being written out
-    /// @param scale the RGB scaling to apply to each LED before writing it out
-    virtual void show(const struct CRGB *data, int nLeds, CRGB scale) {
-        PixelController<RGB_ORDER, LANES, MASK> pixels(data, nLeds < 0 ? -nLeds : nLeds, scale, getDither());
+    /// @param scale_pre_mixed the RGB scaling of color adjustment + global brightness to apply to each LED (in RGB8 mode).
+    virtual void show(const struct CRGB *data, int nLeds, CRGB scale_pre_mixed) {
+        PixelController<RGB_ORDER, LANES, MASK> pixels(data, nLeds < 0 ? -nLeds : nLeds, scale_pre_mixed, getDither());
         if(nLeds < 0) {
             // nLeds < 0 implies that we want to show them in reverse
             pixels.mAdvance = -pixels.mAdvance;

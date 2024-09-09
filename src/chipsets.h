@@ -4,6 +4,7 @@
 #include "FastLED.h"
 #include "pixeltypes.h"
 #include "five_bit_hd_gamma.h"
+#include "force_inline.h"
 
 /// @file chipsets.h
 /// Contains the bulk of the definitions for the various LED chipsets supported.
@@ -91,9 +92,10 @@ class LPD8806Controller : public CPixelLEDController<RGB_ORDER> {
 	class LPD8806_ADJUST {
 	public:
 		// LPD8806 spec wants the high bit of every rgb data byte sent out to be set.
-		__attribute__((always_inline)) inline static uint8_t adjust(FASTLED_REGISTER uint8_t data) { return ((data>>1) | 0x80) + ((data && (data<254)) & 0x01); }
-		__attribute__((always_inline)) inline static void postBlock(int len) {
-			SPI::writeBytesValueRaw(0, ((len*3+63)>>6));
+		FASTLED_FORCE_INLINE static uint8_t adjust(FASTLED_REGISTER uint8_t data) { return ((data>>1) | 0x80) + ((data && (data<254)) & 0x01); }
+		FASTLED_FORCE_INLINE static void postBlock(int len, void* context = NULL) {
+			SPI* pSPI = static_cast<SPI*>(context);
+			pSPI->writeBytesValueRaw(0, ((len*3+63)>>6));
 		}
 
 	};
@@ -110,7 +112,7 @@ protected:
 
 	/// @copydoc CPixelLEDController::showPixels()
 	virtual void showPixels(PixelController<RGB_ORDER> & pixels) {
-		mSPI.template writePixels<0, LPD8806_ADJUST, RGB_ORDER>(pixels);
+		mSPI.template writePixels<0, LPD8806_ADJUST, RGB_ORDER>(pixels, &mSPI);
 	}
 };
 
@@ -146,7 +148,7 @@ protected:
 	/// @copydoc CPixelLEDController::showPixels()
 	virtual void showPixels(PixelController<RGB_ORDER> & pixels) {
 		mWaitDelay.wait();
-		mSPI.template writePixels<0, DATA_NOP, RGB_ORDER>(pixels);
+		mSPI.template writePixels<0, DATA_NOP, RGB_ORDER>(pixels, NULL);
 		mWaitDelay.mark();
 	}
 };
@@ -218,7 +220,12 @@ protected:
 template <
 	uint8_t DATA_PIN, uint8_t CLOCK_PIN,
 	EOrder RGB_ORDER = RGB,
-	uint32_t SPI_SPEED = DATA_RATE_MHZ(12),
+	// APA102 has a bug where long strip can't handle full speed due to clock degredation.
+	// This only affects long strips, but then again if you have a short strip does 6 mhz actually slow
+	// you down?  Probably not. And you can always bump it up for speed. Therefore we are prioritizing
+	// "just works" over "fastest possible" here.
+	// https://www.pjrc.com/why-apa102-leds-have-trouble-at-24-mhz/
+	uint32_t SPI_SPEED = DATA_RATE_MHZ(6),
 	FiveBitGammaCorrectionMode GAMMA_CORRECTION_MODE = kFiveBitGammaCorrectionMode_Null,
 	uint32_t START_FRAME = 0x00000000,
 	uint32_t END_FRAME = 0xFF000000
@@ -321,10 +328,10 @@ private:
 		getGlobalBrightnessAndScalingFactors(pixels, &s0, &s1, &s2, &global_brightness);
 		startBoundary();
 		while (pixels.has(1)) {
-			uint8_t r = pixels.loadAndScale0(0, s0);
-			uint8_t g = pixels.loadAndScale1(0, s1);
-			uint8_t b = pixels.loadAndScale2(0, s2);
-			writeLed(global_brightness, r, g, b);
+			uint8_t c0 = pixels.loadAndScale0(0, s0);
+			uint8_t c1 = pixels.loadAndScale1(0, s1);
+			uint8_t c2 = pixels.loadAndScale2(0, s2);
+			writeLed(global_brightness, c0, c1, c2);
 			pixels.stepDithering();
 			pixels.advanceData();
 		}
@@ -336,24 +343,12 @@ private:
 
 	inline void showPixelsGammaBitShift(PixelController<RGB_ORDER> & pixels) {
 		mSPI.select();
-		uint8_t r_scale = pixels.getScale0();
-		uint8_t g_scale = pixels.getScale1();
-		uint8_t b_scale = pixels.getScale2();
 		startBoundary();
 		while (pixels.has(1)) {
 			// Load raw uncorrected r,g,b values.
-			uint8_t r = pixels.loadAndScale0(0, 0xFF);
-			uint8_t g = pixels.loadAndScale1(0, 0xFF);
-			uint8_t b = pixels.loadAndScale2(0, 0xFF);
-			uint8_t brightness = 0;
-			if ((r | g | b) != 0) {
-				// Compute the gamma correction for non black pixels.
-				five_bit_hd_gamma_bitshift(
-					r, g, b,
-					r_scale, g_scale, b_scale,  // Post-gamma scale.
-					&r, &g, &b, &brightness);
-			}
-			writeLed(brightness, r, g, b);
+			uint8_t brightness, c0, c1, c2;  // c0-c2 is the RGB data re-ordered for pixel
+			pixels.loadAndScale_APA102_HD(&c0, &c1, &c2, &brightness);
+			writeLed(brightness, c0, c1, c2);
 			pixels.stepDithering();
 			pixels.advanceData();
 		}
@@ -363,11 +358,21 @@ private:
 	}
 };
 
+/// APA102 high definition controller class.
+/// @tparam DATA_PIN the data pin for these LEDs
+/// @tparam CLOCK_PIN the clock pin for these LEDs
+/// @tparam RGB_ORDER the RGB ordering for these LEDs
+/// @tparam SPI_SPEED the clock divider used for these LEDs.  Set using the ::DATA_RATE_MHZ / ::DATA_RATE_KHZ macros.  Defaults to ::DATA_RATE_MHZ(24)
 template <
 	uint8_t DATA_PIN,
 	uint8_t CLOCK_PIN,
 	EOrder RGB_ORDER = RGB,
-	uint32_t SPI_SPEED = DATA_RATE_MHZ(24)
+	// APA102 has a bug where long strip can't handle full speed due to clock degredation.
+	// This only affects long strips, but then again if you have a short strip does 6 mhz actually slow
+	// you down?  Probably not. And you can always bump it up for speed. Therefore we are prioritizing
+	// "just works" over "fastest possible" here.
+	// https://www.pjrc.com/why-apa102-leds-have-trouble-at-24-mhz/
+	uint32_t SPI_SPEED = DATA_RATE_MHZ(6)
 >
 class APA102ControllerHD : public APA102Controller<
 	DATA_PIN,
@@ -391,7 +396,7 @@ template <
 	uint8_t DATA_PIN,
 	uint8_t CLOCK_PIN,
 	EOrder RGB_ORDER = RGB,
-	uint32_t SPI_SPEED = DATA_RATE_MHZ(24)
+	uint32_t SPI_SPEED = DATA_RATE_MHZ(12)
 >
 class SK9822Controller : public APA102Controller<
 	DATA_PIN,
@@ -413,7 +418,7 @@ template <
 	uint8_t DATA_PIN,
 	uint8_t CLOCK_PIN,
 	EOrder RGB_ORDER = RGB,
-	uint32_t SPI_SPEED = DATA_RATE_MHZ(24)
+	uint32_t SPI_SPEED = DATA_RATE_MHZ(12)
 >
 class SK9822ControllerHD : public APA102Controller<
 	DATA_PIN,
@@ -522,7 +527,7 @@ protected:
 		// Make sure the FLAG_START_BIT flag is set to ensure that an extra 1 bit is sent at the start
 		// of each triplet of bytes for rgb data
 		// writeHeader();
-		mSPI.template writePixels<FLAG_START_BIT, DATA_NOP, RGB_ORDER>( pixels );
+		mSPI.template writePixels<FLAG_START_BIT, DATA_NOP, RGB_ORDER>(pixels, NULL);
 		writeHeader();
 	}
 
@@ -728,7 +733,7 @@ template <uint8_t DATA_PIN, EOrder RGB_ORDER = RGB>
 class TM1809Controller800Khz : public ClocklessController<DATA_PIN, C_NS(350), C_NS(350), C_NS(450), RGB_ORDER> {};
 
 // WS2811 - 320ns, 320ns, 640ns
-template <uint8_t DATA_PIN, EOrder RGB_ORDER = RGB>
+template <uint8_t DATA_PIN, EOrder RGB_ORDER = GRB>
 class WS2811Controller800Khz : public ClocklessController<DATA_PIN, C_NS(320), C_NS(320), C_NS(640), RGB_ORDER> {};
 
 // WS2813 - 320ns, 320ns, 640ns
@@ -736,11 +741,11 @@ template <uint8_t DATA_PIN, EOrder RGB_ORDER = RGB>
 class WS2813Controller : public ClocklessController<DATA_PIN, C_NS(320), C_NS(320), C_NS(640), RGB_ORDER> {};
 
 // WS2812 - 250ns, 625ns, 375ns
-template <uint8_t DATA_PIN, EOrder RGB_ORDER = RGB>
+template <uint8_t DATA_PIN, EOrder RGB_ORDER = GRB>
 class WS2812Controller800Khz : public ClocklessController<DATA_PIN, C_NS(250), C_NS(625), C_NS(375), RGB_ORDER> {};
 
 // WS2811@400khz - 800ns, 800ns, 900ns
-template <uint8_t DATA_PIN, EOrder RGB_ORDER = RGB>
+template <uint8_t DATA_PIN, EOrder RGB_ORDER = GRB>
 class WS2811Controller400Khz : public ClocklessController<DATA_PIN, C_NS(800), C_NS(800), C_NS(900), RGB_ORDER> {};
 
 // 750NS, 750NS, 750NS
