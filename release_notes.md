@@ -1,3 +1,52 @@
+FastLED 3.8.0
+=============
+* New APA102 global brightness algorithm
+  * APA102
+  * APA102HD
+* 3.7.8: attiny85 size 9447 is within the limit of 9500
+* 3.8.0: attiny85 size 9296 is within the limit of 9500
+
+
+FastLED 3.7.8
+=============
+* Attiny0/1 (commonly Attiny85) support added.
+  * https://github.com/FastLED/FastLED/pull/1292 , https://github.com/FastLED/FastLED/pull/1183 , https://github.com/FastLED/FastLED/pull/1061
+  * Special thanks to [@freemovers](https://github.com/freemovers), [@jasoncoon](https://github.com/jasoncoon), [@ngyl88](https://github.com/ngyl88) for the contribution.
+  * Many common boards are now compiling in the Attiny family. See our repo for which ones are supported.
+* Arduino nano compiling with new pin definitions.
+  *  https://github.com/FastLED/FastLED/pull/1719
+  *  Thanks to https://github.com/ngyl88 for the contribution!
+* New STM32F1 boards compiling
+  * bluepill
+  * maple mini
+* CPPCheck now passing for HIGH and MEDIUM severity on all platforms.
+
+
+FastLED 3.7.7
+=============
+* WS2812 RGBW mode is now part of the API.
+  * Api: `FastLED.addLeds<WS2812, DATA_PIN, GRB>(leds, NUM_LEDS).setRgbw(RgbwDefault());`
+  * Only enabled on ESP32 boards, no op on other platforms.
+  * See [examples/RGBW/RGBW.ino](https://github.com/FastLED/FastLED/blob/master/examples/RGBW/RGBW.ino)
+* WS2812 Emulated RGBW Controller
+  * Works on all platforms (theoretically)
+  * Has an extra side buffer to convert RGB -> RGBW data.
+    * This data is sent to the real driver as if it were RGB data.
+    * Some padding is added when source LED data is not a multiple of 3.
+  * See [examples/RGBWEmulated/RGBWEmulated.ino](https://github.com/FastLED/FastLED/blob/master/examples/RGBW/RGBW.ino)
+* New supported chipsets
+  * UCS1912 (Clockless)
+  * WS2815 (Clockless)
+* New supported boards
+  * xiaoblesense_adafruit
+    * Fixes https://github.com/FastLED/FastLED/issues/1445
+* [PixelIterator](src/pixel_iterator.h) has been introduced to reduce complexity of writing driver code
+  * This is how RGBW mode was implemented.
+  * This is a concrete class (no templates!) so it's suitable for driver code in cpp files.
+  * PixelController<> can convert to a PixelIterator, see `PixelController<>::as_iterator(...)`
+* Fixed APA102HD mode for user supplied function via the linker. Added test so that it won't break.
+
+
 FastLED 3.7.6
 =============
 * WS2812 RGBW Mode enabled on ESP32 via experimental `FASTLED_EXPERIMENTAL_ESP32_RGBW_ENABLED`

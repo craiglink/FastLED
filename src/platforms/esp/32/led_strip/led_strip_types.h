@@ -7,15 +7,14 @@
 
 #include <stdint.h>
 
-
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include "namespace.h"
+LED_STRIP_NAMESPACE_BEGIN
 
 /**
  * @brief LED strip pixel format
  */
 typedef enum {
+    // Note - Zach Vorhies - Only this enum means that there is no re-ordering of the colors.
     LED_PIXEL_FORMAT_GRB,    /*!< Pixel format: GRB */
     LED_PIXEL_FORMAT_GRBW,   /*!< Pixel format: GRBW */
     LED_PIXEL_FORMAT_INVALID /*!< Invalid pixel format */
@@ -50,7 +49,4 @@ typedef struct {
     } flags;                    /*!< Extra driver flags */
 } led_strip_config_t;
 
-
-#ifdef __cplusplus
-}
-#endif
+LED_STRIP_NAMESPACE_END

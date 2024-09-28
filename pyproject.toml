@@ -13,6 +13,13 @@ dependencies = [
     "clang-format",
     "isort",
     "black",
+    "pip",
+    "pytest",
+    "fpvgcc",
+    "uv",
+    "ziglang",
+    "ninja",
+    "cmake"
 ]
 
 [build-system]
